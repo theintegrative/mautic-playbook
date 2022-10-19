@@ -1,0 +1,108 @@
+---
+- hosts: all
+  vars:
+    user_name: theintegrative
+    site_dir: /var/www/html/mautic/
+    site_name: localhost
+    admin_email: email@example.com  
+  become: true
+
+  tasks:
+    - name: Update and upgrade the system
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: yes
+      become: true
+
+    - name: Add the repositories with the right packages
+      ansible.builtin.apt_repository:
+        repo: "{{ item }}"
+        state: present
+      loop:
+        - ppa:ondrej/php
+        - ppa:ondrej/apache2
+
+    - name: Install the packages mautic depends on
+      ansible.builtin.apt:
+        name:
+          - apache2
+          - mariadb-server
+          - mariadb-client
+          - software-properties-common
+          - php7.4
+          - libapache2-mod-php7.4
+          - php7.4-common
+          - php7.4-gmp
+          - php7.4-curl
+          - php7.4-intl
+          - php7.4-mbstring
+          - php7.4-xmlrpc
+          - php7.4-mysql
+          - php7.4-bcmath
+          - php7.4-gd
+          - php7.4-xml
+          - php7.4-cli
+          - php7.4-fpm
+          - php7.4-zip
+          - php7.4-imap
+          - unzip
+        state: latest
+        update_cache: yes
+
+    - name: Create the website directory if it does not exist
+      ansible.builtin.file:
+        path: "{{ site_dir }}"
+        state: directory
+
+
+    - name: Download mautic zip and unpack it
+      ansible.builtin.unarchive:
+        src: https://github.com/mautic/mautic/releases/download/4.4.2/4.4.2.zip
+        dest: "{{ site_dir }}"
+        remote_src: true
+
+    - name: Recursively change ownership for your website
+      ansible.builtin.file:
+        path: "{{ site_dir }}"
+        state: directory
+        recurse: yes
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Create the configuration file for the site
+      ansible.builtin.file:
+        path: /etc/apache2/sites-available/mautic.conf
+        state: touch
+
+    - name: Congifurations for the website
+      ansible.builtin.blockinfile:
+        path: /etc/apache2/sites-available/mautic.conf
+        block: |
+          <VirtualHost *:80>
+          ServerAdmin "{{ admin_email }}"
+          DocumentRoot "{{ site_dir }}"
+          ServerName "{{ site_name }}"
+
+          <Directory "{{ site_dir }}">
+          Options +FollowSymlinks
+          AllowOverride All
+          Require all granted
+          </Directory>
+
+          ErrorLog ${APACHE_LOG_DIR}/error.log
+          CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+
+    - name: Rewrite the modules into apache
+      ansible.builtin.shell:
+        cmd: "{{ item }}"
+      loop:
+        - a2ensite mautic.conf
+        - a2enmod rewrite
+
+    - name: Restart the apache2 service
+      ansible.builtin.service:
+        name: apache2
+        enabled: true
+        state: restarted
